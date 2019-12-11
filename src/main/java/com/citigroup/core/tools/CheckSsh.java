@@ -25,11 +25,7 @@ public class CheckSsh {
     public static void run(Options options) {
         Session session = connectToJumpBox(options);
         List<String> hosts = loadHosts(options.remotesFilename);
-        hosts.forEach(host -> {
-            System.out.println("\n\nTrying "+ host);
-            AskResult result = askHost(session, host, options);
-            System.out.println(result.toString());
-        });
+        hosts.forEach(host -> System.out.println(askHost(session, host, options)));
         session.disconnect();
     }
 
@@ -49,7 +45,6 @@ public class CheckSsh {
     public static Session connectToJumpBox(Options options) {
         Properties config = new Properties();
         config.put("StrictHostKeyChecking", "no");
-        config.put("PreferredAuthentications", "password");
 
         JSch jSch = new JSch();
         Session session;
@@ -69,9 +64,9 @@ public class CheckSsh {
         }
     }
 
-    public static String readResponse(Channel channel, InputStream in) throws IOException {
+    public static AskResult readResponse(Channel channel, InputStream in, String hostname) throws IOException {
 
-        StringBuilder result = new StringBuilder("Result: ");
+        StringBuilder result = new StringBuilder();
         byte[] tmp = new byte[1024];
         while (true) {
             while (in.available() > 0) {
@@ -79,93 +74,39 @@ public class CheckSsh {
                 if (i < 0) break;
                 String data = new String(tmp, 0, i);
                 result.append(data);
-                System.out.println(data);
             }
             if (channel.isClosed()) {
-                System.out.println("Exit status: " + channel.getExitStatus());
+                if (channel.getExitStatus() != 0) {
+                    return AskResult.failed(hostname, "SSH execution result is not 0 but " + channel.getExitStatus());
+                }
                 break;
             }
         }
-        return result.toString();
+        if (result.toString().contains(hostname)) {
+            return AskResult.success(hostname);
+        }
+        return AskResult.failed(hostname, "Unknown reason");
     }
-
-//    public static void execute(PrintStream printStream, String command) {
-//        printStream.print(command + "\n");
-//        printStream.flush();
-//    }
-
-//    public static AskResult askHost(Session session, String hostname, Options options) {
-//        String command = String.format(SSH_COMMAND, options.name, hostname);
-//        System.out.println("Command: " + command);
-//        try {
-//            Channel channel = session.openChannel("exec");
-//            channel.connect();
-//
-//            ((ChannelExec) channel).setPty(true);
-//            InputStream in = channel.getInputStream();
-//            channel.setInputStream(null);
-//            ((ChannelExec) channel).setErrStream(System.err);
-//            PrintStream printStream = new PrintStream(channel.getOutputStream());
-//
-//            Thread.sleep(500);
-//            execute(printStream, command);
-//            Thread.sleep(500);
-//            execute(printStream, options.password);
-//
-//            String response = readResponse(channel, in);
-//            System.out.println("Response: [" + response + "]");
-//
-//            channel.disconnect();
-//            return AskResult.success(hostname);
-//        } catch (JSchException e) {
-//            return AskResult.failed(hostname, e.getMessage());
-//        } catch (IOException e) {
-//            return AskResult.failed(hostname, e.getMessage());
-//        } catch (InterruptedException e) {
-//            e.printStackTrace();
-//            return AskResult.failed(hostname, e.getMessage());
-//        }
-//    }
-
-//    public static AskResult askHost(Session session, String hostname, Options options) {
-//        try {
-//            Channel channel = session.openChannel("exec");
-//            String command = String.format(SSH_COMMAND, options.name, hostname);
-//            System.out.println("Executing: " + command);
-//            ((ChannelExec) channel).setCommand(command);
-//            channel.setInputStream(null);
-//            OutputStream out = channel.getOutputStream();
-//            ((ChannelExec) channel).setErrStream(System.err);
-//            InputStream in = channel.getInputStream();
-//            ((ChannelExec) channel).setPty(true);
-//            channel.connect();
-//            Thread.sleep(1000);
-//            out.write((options.password + "\n").getBytes());
-//            out.flush();
-//            System.out.println("Read response");
-//            String response = readResponse(channel, in);
-//            System.out.println("Response: " + response);
-//            channel.disconnect();
-//            return AskResult.success(hostname);
-//        } catch (JSchException e) {
-//            return AskResult.failed(hostname, e.getMessage());
-//        } catch (IOException e) {
-//            return AskResult.failed(hostname, e.getMessage());
-//        } catch (InterruptedException e) {
-//            e.printStackTrace();
-//            return AskResult.failed(hostname, e.getMessage());
-//        }
-//    }
 
     public static AskResult askHost(Session session, String hostname, Options options) {
         try {
-            ChannelFacade facade = ChannelFacade.open(session);
+            Channel channel = session.openChannel("exec");
             String command = String.format(SSH_COMMAND, options.name, hostname);
-            System.out.println(facade.execute(command));
+            ((ChannelExec) channel).setCommand(command);
+            channel.setInputStream(null);
+            OutputStream out = channel.getOutputStream();
+            ((ChannelExec) channel).setErrStream(System.err);
+            InputStream in = channel.getInputStream();
+            ((ChannelExec) channel).setPty(true);
+            channel.connect();
             Thread.sleep(1000);
-            System.out.println(facade.execute(options.password));
-            facade.disconnect();
-            return AskResult.success(hostname);
+            out.write((options.password + "\n").getBytes());
+            out.flush();
+            AskResult response = readResponse(channel, in, hostname);
+            channel.disconnect();
+            return response;
+        } catch (JSchException e) {
+            return AskResult.failed(hostname, e.getMessage());
         } catch (IOException e) {
             return AskResult.failed(hostname, e.getMessage());
         } catch (InterruptedException e) {

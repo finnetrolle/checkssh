@@ -20,18 +20,6 @@ public class AskResult {
         return new AskResult(hostname, false, reason);
     }
 
-    public boolean isSuccess() {
-        return isSuccess;
-    }
-
-    public String getFailure() {
-        return failure;
-    }
-
-    public String getHostname() {
-        return hostname;
-    }
-
     @Override
     public String toString() {
         StringBuilder sb = new StringBuilder();
