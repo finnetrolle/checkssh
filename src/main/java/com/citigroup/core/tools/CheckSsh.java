@@ -8,12 +8,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
 import java.util.Scanner;
+import java.util.stream.Collectors;
 
 public class CheckSsh {
 
     public static final String SSH_COMMAND = "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 %s@%s hostname";
 
     public static void main(String[] args) {
+        System.out.println("Loading options...");
         Options options = new Options();
         JCommander.newBuilder()
                 .addObject(options)
@@ -23,10 +25,28 @@ public class CheckSsh {
     }
 
     public static void run(Options options) {
+        System.out.println("Connecting to jump box...");
         Session session = connectToJumpBox(options);
+        System.out.println("Loading remotes...");
         List<String> hosts = loadHosts(options.remotesFilename);
-        hosts.forEach(host -> System.out.println(askHost(session, host, options)));
+        System.out.println("Try each remote...");
+        List<AskResult> results = hosts.stream().map(host -> askHost(session, host, options)).collect(Collectors.toList());
+        System.out.println("Complete. Saving to file...");
+        save(results);
         session.disconnect();
+        System.out.println("Done.");
+    }
+
+    public static void save(List<AskResult> results) {
+        try {
+            FileWriter writer = new FileWriter("out.txt");
+            for (AskResult result : results) {
+                writer.write(result.toString() + "\n");
+            }
+            writer.close();
+        } catch (IOException e){
+            System.out.println("Error while writing to file");
+        }
     }
 
     public static List<String> loadHosts(String filename) {
@@ -39,6 +59,7 @@ public class CheckSsh {
         }
         List<String> result = new ArrayList<>();
         scanner.forEachRemaining(result::add);
+        System.out.println("Loaded " + result.size() + " hostnames");
         return result;
     }
 
@@ -56,12 +77,18 @@ public class CheckSsh {
             System.out.println("Connected to Jump box " + options.jumpServer);
             return session;
         } catch (JSchException e) {
-            if ("Auth fail".equals(e.getMessage())) {
-                System.out.println("Can't connect to Jump box");
-            }
+            System.out.println("Can't connect to jump box because of " + e.getMessage());
             System.exit(1);
             return null;
         }
+    }
+
+    public static String defineError(String result) {
+        if (result.contains("Connection timed out")) {
+            return "Connection timed out";
+        }
+        System.out.println("UNDEFINED ERROR. DEBUG INFO\n-----\n"+result+"\n-----");
+        return "undefined error";
     }
 
     public static AskResult readResponse(Channel channel, InputStream in, String hostname) throws IOException {
@@ -77,7 +104,8 @@ public class CheckSsh {
             }
             if (channel.isClosed()) {
                 if (channel.getExitStatus() != 0) {
-                    return AskResult.failed(hostname, "SSH execution result is not 0 but " + channel.getExitStatus());
+                    String error = defineError(result.toString());
+                    return AskResult.failed(hostname, error);
                 }
                 break;
             }
@@ -89,6 +117,7 @@ public class CheckSsh {
     }
 
     public static AskResult askHost(Session session, String hostname, Options options) {
+        System.out.println("Trying to ask " + hostname);
         try {
             Channel channel = session.openChannel("exec");
             String command = String.format(SSH_COMMAND, options.name, hostname);
