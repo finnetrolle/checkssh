@@ -4,6 +4,8 @@ import com.beust.jcommander.JCommander;
 import com.jcraft.jsch.*;
 
 import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
@@ -14,8 +16,8 @@ public class CheckSsh {
 
     public static final String SSH_COMMAND = "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 %s@%s hostname";
 
-    public static void main(String[] args) {
-        System.out.println("Loading options...");
+    public static void main(String[] args) throws IOException {
+        System.out.println("Parsing options...");
         Options options = new Options();
         JCommander.newBuilder()
                 .addObject(options)
@@ -24,13 +26,17 @@ public class CheckSsh {
         run(options);
     }
 
-    public static void run(Options options) {
-        System.out.println("Connecting to jump box...");
-        Session session = connectToJumpBox(options);
+    public static void run(Options options) throws IOException {
+        System.out.println("Loading password...");
+        String password = Files.readAllLines(Paths.get(options.passwordFile)).get(0);
         System.out.println("Loading remotes...");
         List<String> hosts = loadHosts(options.remotesFilename);
+        System.out.println("Connecting to jump box...");
+        Session session = connectToJumpBox(options, password);
         System.out.println("Try each remote...");
-        List<AskResult> results = hosts.stream().map(host -> askHost(session, host, options)).collect(Collectors.toList());
+        List<AskResult> results = hosts.stream()
+                .map(host -> askHost(session, host, options, password))
+                .collect(Collectors.toList());
         System.out.println("Complete. Saving to file...");
         save(results);
         session.disconnect();
@@ -63,7 +69,7 @@ public class CheckSsh {
         return result;
     }
 
-    public static Session connectToJumpBox(Options options) {
+    public static Session connectToJumpBox(Options options, String password) {
         Properties config = new Properties();
         config.put("StrictHostKeyChecking", "no");
 
@@ -71,7 +77,7 @@ public class CheckSsh {
         Session session;
         try {
             session = jSch.getSession(options.name, options.jumpServer, 22);
-            session.setPassword(options.password);
+            session.setPassword(password);
             session.setConfig(config);
             session.connect();
             System.out.println("Connected to Jump box " + options.jumpServer);
@@ -95,6 +101,7 @@ public class CheckSsh {
 
         StringBuilder result = new StringBuilder();
         byte[] tmp = new byte[1024];
+        long start = System.currentTimeMillis();
         while (true) {
             while (in.available() > 0) {
                 int i = in.read(tmp, 0, 1024);
@@ -109,6 +116,13 @@ public class CheckSsh {
                 }
                 break;
             }
+            if (System.currentTimeMillis() > 5000 + start) {
+                if (result.toString().contains("Permission denied, please try again.")) {
+                    return AskResult.failed(hostname, "Permission denied");
+                }
+                System.out.println("DATA: "+ result.toString());
+                return AskResult.failed(hostname, "Connected, but met 5sec timeout");
+            }
         }
         if (result.toString().contains(hostname)) {
             return AskResult.success(hostname);
@@ -116,7 +130,7 @@ public class CheckSsh {
         return AskResult.failed(hostname, "Unknown reason");
     }
 
-    public static AskResult askHost(Session session, String hostname, Options options) {
+    public static AskResult askHost(Session session, String hostname, Options options, String password) {
         System.out.println("Trying to ask " + hostname);
         try {
             Channel channel = session.openChannel("exec");
@@ -129,7 +143,7 @@ public class CheckSsh {
             ((ChannelExec) channel).setPty(true);
             channel.connect();
             Thread.sleep(1000);
-            out.write((options.password + "\n").getBytes());
+            out.write((password + "\n").getBytes());
             out.flush();
             AskResult response = readResponse(channel, in, hostname);
             channel.disconnect();
