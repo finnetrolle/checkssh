@@ -93,7 +93,6 @@ public class CheckSsh {
         if (result.contains("Connection timed out")) {
             return "Connection timed out";
         }
-        System.out.println("UNDEFINED ERROR. DEBUG INFO\n-----\n"+result+"\n-----");
         return "undefined error";
     }
 
@@ -120,7 +119,9 @@ public class CheckSsh {
                 if (result.toString().contains("Permission denied, please try again.")) {
                     return AskResult.failed(hostname, "Permission denied");
                 }
-                System.out.println("DATA: "+ result.toString());
+                if (result.toString().contains("Could not chdir to home directory")) {
+                    return AskResult.success(hostname);
+                }
                 return AskResult.failed(hostname, "Connected, but met 5sec timeout");
             }
         }
@@ -149,9 +150,9 @@ public class CheckSsh {
             channel.disconnect();
             return response;
         } catch (JSchException e) {
-            return AskResult.failed(hostname, e.getMessage());
+            return AskResult.failed(hostname, "Jsch exception:" + e.getMessage());
         } catch (IOException e) {
-            return AskResult.failed(hostname, e.getMessage());
+            return AskResult.failed(hostname, "IOException: " + e.getMessage());
         } catch (InterruptedException e) {
             e.printStackTrace();
             return AskResult.failed(hostname, e.getMessage());
