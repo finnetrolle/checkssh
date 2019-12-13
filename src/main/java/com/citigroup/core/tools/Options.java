@@ -12,6 +12,8 @@ public class Options {
     String jumpServer;
     @Parameter(names = {"--password-file", "-pf"})
     String passwordFile;
+    @Parameter(names = {"--timeout", "-t"})
+    String timeout;
 
 
 }

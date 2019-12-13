@@ -6,15 +6,19 @@ import com.jcraft.jsch.*;
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
 import java.util.Scanner;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class CheckSsh {
 
-    public static final String SSH_COMMAND = "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 %s@%s hostname";
+    public static final String SSH_COMMAND = "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=%s %s@%s hostname";
 
     public static void main(String[] args) throws IOException {
         System.out.println("Parsing options...");
@@ -54,6 +58,17 @@ public class CheckSsh {
             System.out.println("Error while writing to file");
         }
     }
+
+    public static void save(String filename, String data) {
+        try {
+            FileWriter writer = new FileWriter(filename);
+            writer.write(data);
+            writer.close();
+        } catch (IOException e){
+            System.out.println("Error while writing to log data file");
+        }
+    }
+
 
     public static List<String> loadHosts(String filename) {
         Scanner scanner = null;
@@ -128,14 +143,17 @@ public class CheckSsh {
         if (result.toString().contains(hostname)) {
             return AskResult.success(hostname);
         }
-        return AskResult.failed(hostname, "Unknown reason");
+        String name = "output_data_" + hostname + "_" + LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+        save(name, result.toString());
+        System.out.println("Can't make decision for " + hostname + ". Output data saved to " + name);
+        return AskResult.failed(hostname, "Unknown reason. Data saved to " + name);
     }
 
     public static AskResult askHost(Session session, String hostname, Options options, String password) {
-        System.out.println("Trying to ask " + hostname);
+        System.out.println("Trying to ssh " + hostname);
         try {
             Channel channel = session.openChannel("exec");
-            String command = String.format(SSH_COMMAND, options.name, hostname);
+            String command = String.format(SSH_COMMAND, options.timeout, options.name, hostname);
             ((ChannelExec) channel).setCommand(command);
             channel.setInputStream(null);
             OutputStream out = channel.getOutputStream();
